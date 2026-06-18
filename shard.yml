@@ -1,0 +1,16 @@
+name: yaml-tidy
+version: 0.1.0
+
+description: >
+  Range un fichier YAML : trie les clés des mappings par ordre alphabétique,
+  récursivement à tous les niveaux (y compris dans les items de séquence), en
+  PRÉSERVANT les commentaires (au-dessus d'une clé et inline) et l'ordre des
+  éléments de séquence. Optionnellement épingle une 1ʳᵉ ligne de commentaire.
+  Approche ligne-à-ligne (le YAML de la stdlib perd les commentaires).
+
+authors:
+  - ALOLI sas <philippe@aloli.fr>
+
+crystal: ">= 1.19.1"
+
+license: MIT

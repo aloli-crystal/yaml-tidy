@@ -1,0 +1,43 @@
+= yaml-tidy
+
+Range un fichier YAML : trie les clés des mappings par ordre **alphabétique**,
+**récursivement à tous les niveaux** (enfants, petits-enfants, et même les clés
+*à l'intérieur* d'un item de séquence qui est un mapping), en **préservant les
+commentaires** — ce que `YAML.parse` + `to_yaml` de la stdlib détruisent.
+
+Pensé pour des fichiers de config tenus à la main, où l'ordre alphabétique des
+clés évite de parcourir tout le fichier pour trouver son bonheur, et où les
+commentaires portent l'essentiel de l'info.
+
+== Ce qui est garanti
+
+* Clés de mapping triées alpha, **récursif**, y compris dans les « dash-maps »
+  (`- name: x` + `groups: …` → `groups` avant `name`, la 1ʳᵉ clé restant sur la
+  ligne du tiret).
+* Commentaires **au-dessus** d'une clé : déplacés AVEC elle au tri.
+* Commentaires **inline** : préservés.
+* **Ordre des éléments** de séquence (listes) : préservé — seules les CLÉS se
+  trient, jamais l'ordre d'une liste (recettes, disques…).
+* Aucune donnée perdue ou altérée (`YAML.parse` du résultat == `YAML.parse` de
+  l'entrée).
+* En-tête optionnel épinglé en 1ʳᵉ ligne (idempotent).
+
+== Usage
+
+[source,crystal]
+----
+require "yaml-tidy"
+
+YamlTidy.tidy(File.read("conf.yml"))                       # tri seul
+YamlTidy.tidy(content, header: "monserveur.example.net")   # + `# monserveur.example.net` en tête
+----
+
+== Limites
+
+Approche **ligne-à-ligne** (pour préserver les commentaires). Suppose une
+indentation par **espaces** et **pas de scalaires multi-lignes** (`|`, `>`).
+Adapté aux fichiers de config réguliers, pas à du YAML arbitraire.
+
+== Licence
+
+MIT — ALOLI sas.
