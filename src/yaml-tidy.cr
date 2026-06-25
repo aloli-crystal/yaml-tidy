@@ -16,7 +16,13 @@
 module YamlTidy
   extend self
 
-  VERSION = "0.1.0"
+  VERSION = {{
+              (read_file("#{__DIR__}/../shard.yml")
+                .lines
+                .find(&.starts_with?("version:")) || "version: 0.0.0")
+                .gsub(/^version:\s*/, "")
+                .chomp
+            }}
 
   # Un nœud, selon le cas :
   #   - mapping ou scalaire : `line` = ligne brute, `children` = sous-clés ;
