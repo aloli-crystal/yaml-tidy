@@ -84,4 +84,50 @@ describe YamlTidy do
     res.index("deploy").not_nil!.should be < res.index("admin").not_nil!
     YAML.parse(res).should eq(YAML.parse(yaml))
   end
+
+  describe "scalaires multi-lignes (texte recopié tel quel)" do
+    it "bloc `|` : ne trie pas les lignes qui contiennent « : »" do
+      yaml = "role: apps\nnotes: |\n  Applications marteen.\n  CPU Ivy Bridge : générique.\n  Disque : 160 Go.\n"
+      res = YamlTidy.tidy(yaml)
+      res.should contain("notes: |\n  Applications marteen.\n  CPU Ivy Bridge : générique.\n  Disque : 160 Go.\n")
+      res.index("notes:").not_nil!.should be < res.index("role:").not_nil! # clés triées quand même
+      YAML.parse(res).should eq(YAML.parse(yaml))
+    end
+
+    it "bloc `>-` avec ligne vide intérieure et commentaire d'indicateur" do
+      yaml = "b: 1\na: >- # replié\n  zèbre : un\n\n  alpha : deux\nc: 3\n"
+      res = YamlTidy.tidy(yaml)
+      res.should contain("a: >- # replié\n  zèbre : un\n\n  alpha : deux\n")
+      YAML.parse(res).should eq(YAML.parse(yaml))
+    end
+
+    it "chaîne entre apostrophes sur plusieurs lignes (forme écrite par to_yaml)" do
+      yaml = "role: backup\nnotes: '16 Go : pas d’applications.\n\n  Cible : sauvegardes.\n\n  '\n"
+      res = YamlTidy.tidy(yaml)
+      YAML.parse(res)["notes"].should eq(YAML.parse(yaml)["notes"])
+      res.should contain("notes: '16 Go : pas d’applications.\n\n  Cible : sauvegardes.\n\n  '\n")
+    end
+
+    it "apostrophe fermante en colonne 0 (forme du to_yaml de Crystal)" do
+      yaml = "role: backup\nnotes: '16 Go : pas d’applications.\n\n  Cible : sauvegardes.\n\n'\novh:\n  rack: W16\n"
+      res = YamlTidy.tidy(yaml)
+      res.should contain("notes: '16 Go : pas d’applications.\n\n  Cible : sauvegardes.\n\n'\n")
+      YAML.parse(res).should eq(YAML.parse(yaml))
+      res.index("notes:").not_nil!.should be < res.index("ovh:").not_nil!
+      res.index("ovh:").not_nil!.should be < res.index("role:").not_nil!
+    end
+
+    it "bloc dans un item de séquence" do
+      yaml = "users:\n  - name: deploy\n    bio: |\n      Zèbre : premier.\n      Alpha : second.\n"
+      res = YamlTidy.tidy(yaml)
+      res.should contain("  - bio: |\n      Zèbre : premier.\n      Alpha : second.\n    name: deploy\n")
+      YAML.parse(res).should eq(YAML.parse(yaml))
+    end
+
+    it "idempotent" do
+      yaml = "notes: |\n  Zèbre : un.\n  Alpha : deux.\nrole: x\n"
+      once = YamlTidy.tidy(yaml)
+      YamlTidy.tidy(once).should eq(once)
+    end
+  end
 end

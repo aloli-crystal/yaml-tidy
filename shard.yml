@@ -1,5 +1,5 @@
 name: yaml-tidy
-version: 0.1.1
+version: 0.1.2
 
 description: >
   Range un fichier YAML : trie les clés des mappings par ordre alphabétique,

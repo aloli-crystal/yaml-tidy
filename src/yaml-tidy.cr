@@ -8,8 +8,10 @@
 # Optionnellement, épingle une 1ʳᵉ ligne de commentaire (`header`), idempotent.
 #
 # Approche ligne-à-ligne : le `YAML` de la stdlib perd les commentaires, alors
-# qu'ils portent souvent l'essentiel de l'info pour un humain. Hypothèses :
-# indentation par espaces, pas de scalaires multi-lignes (`|`/`>`).
+# qu'ils portent souvent l'essentiel de l'info pour un humain. Hypothèse :
+# indentation par espaces. Les scalaires MULTI-LIGNES (blocs `|`/`>` et
+# chaînes entre apostrophes ou guillemets sur plusieurs lignes) sont recopiés
+# TELS QUELS : leurs lignes sont du texte, jamais des clés à trier.
 #
 #     YamlTidy.tidy(File.read("conf.yml"))                 # tri seul
 #     YamlTidy.tidy(content, header: "monserveur.example") # + `# monserveur.example` en tête
@@ -35,10 +37,13 @@ module YamlTidy
     property key : String?
     property children : Array(Node)
     property dash_indent : Int32?
+    # Lignes d'un scalaire multi-ligne qui suit `line` : recopiées telles quelles.
+    property raw : Array(String)
 
     def initialize(@comments : Array(String), @line : String?, @key : String?)
       @children = [] of Node
       @dash_indent = nil
+      @raw = [] of String
     end
 
     # Élément de séquence (scalaire `- foo` ou dash-map) → ordre préservé.
@@ -68,6 +73,7 @@ module YamlTidy
         emit_dash_map(io, n, di)
       elsif l = n.line
         io << l << '\n'
+        n.raw.each { |r| io << r << '\n' }
         emit(io, n.children)
       end
     end
@@ -84,6 +90,7 @@ module YamlTidy
       else
         io << line << '\n'
       end
+      e.raw.each { |r| io << r << '\n' }
       emit(io, e.children)
     end
   end
@@ -123,6 +130,68 @@ module YamlTidy
     i ? stripped[0...i].strip : nil
   end
 
+  # Genre de scalaire multi-ligne OUVERT par la ligne : `:block` (valeur `|`
+  # ou `>`, indicateurs `-`/`+`/chiffre, commentaire possible), `'\''` ou `'"'`
+  # (chaîne entre apostrophes/guillemets non refermée sur la ligne) ; nil sinon.
+  def multiline_scalar_kind(stripped : String) : Symbol | Char | Nil
+    value = if stripped.starts_with?("- ") && !key_of(stripped[2..])
+              stripped[2..]
+            elsif i = stripped.index(": ")
+              stripped[(i + 2)..]
+            else
+              return nil
+            end
+    value = value.strip
+    return :block if value.matches?(/\A[|>][-+0-9]*\s*(#.*)?\z/)
+    return nil if value.empty?
+    q = value[0]
+    return nil unless q == '\'' || q == '"'
+    closes?(value[1..], q) ? nil : q
+  end
+
+  def multiline_scalar_start?(stripped : String) : Bool
+    !multiline_scalar_kind(stripped).nil?
+  end
+
+  # Vrai si `text` contient le guillemet FERMANT `q` (hors échappements :
+  # `''` entre apostrophes, `\"` et `\\` entre guillemets).
+  private def closes?(text : String, q : Char) : Bool
+    if q == '\''
+      text.gsub("''", "").includes?('\'')
+    else
+      text.gsub("\\\\", "").gsub("\\\"", "").includes?('"')
+    end
+  end
+
+  # Lignes d'une chaîne entre guillemets sur plusieurs lignes : jusqu'à la
+  # ligne qui la referme, QUELLE QUE SOIT son indentation (le `to_yaml` de
+  # Crystal pose l'apostrophe fermante en colonne 0). Retourne {lignes, idx}.
+  private def slurp_quoted(lines : Array(String), idx : Int32, q : Char) : Tuple(Array(String), Int32)
+    raw = [] of String
+    while idx < lines.size
+      raw << lines[idx]
+      idx += 1
+      break if closes?(raw.last, q)
+    end
+    {raw, idx}
+  end
+
+  # Lignes d'un scalaire multi-ligne : tout ce qui est plus indenté que la
+  # ligne d'ouverture (`indent`), lignes vides intérieures comprises ; les
+  # lignes vides finales ne font pas partie du scalaire. Retourne {lignes, idx}.
+  private def slurp_scalar(lines : Array(String), idx : Int32, indent : Int32) : Tuple(Array(String), Int32)
+    raw = [] of String
+    while idx < lines.size && (lines[idx].strip.empty? || indent_of(lines[idx]) > indent)
+      raw << lines[idx]
+      idx += 1
+    end
+    while raw.last?.try(&.strip.empty?)
+      raw.pop
+      idx -= 1
+    end
+    {raw, idx}
+  end
+
   private def next_indent(lines : Array(String), idx : Int32) : Int32?
     while idx < lines.size
       return indent_of(lines[idx]) unless lines[idx].strip.empty?
@@ -160,7 +229,12 @@ module YamlTidy
       break if ci > indent # défensif
 
       stripped = line.lstrip
-      if stripped.starts_with?("- ") && (rest = stripped[2..]) && key_of(rest)
+      if kind = multiline_scalar_kind(stripped)
+        # Scalaire multi-ligne (`notes: |`, `- >`, `x: 'début…`) : ses lignes
+        # sont du TEXTE → recopiées telles quelles, jamais triées.
+        node = Node.new(comments.dup, line, stripped.starts_with?("- ") ? nil : key_of(stripped))
+        node.raw, idx = kind.is_a?(Char) ? slurp_quoted(lines, idx + 1, kind) : slurp_scalar(lines, idx + 1, ci)
+      elsif stripped.starts_with?("- ") && (rest = stripped[2..]) && key_of(rest)
         # ÉLÉMENT de séquence qui est un mapping (« dash-map ») : on reconstruit
         # son mapping = entrée inline (après `- `) + lignes de continuation
         # (indentées à `indent + 2`), puis on parse/trie ce mapping.

@@ -35,7 +35,10 @@ YamlTidy.tidy(content, header: "monserveur.example.net")   # + `# monserveur.exa
 == Limites
 
 Approche **ligne-à-ligne** (pour préserver les commentaires). Suppose une
-indentation par **espaces** et **pas de scalaires multi-lignes** (`|`, `>`).
+indentation par **espaces**. Les scalaires **multi-lignes** — blocs `|` et `>`
+(avec leurs indicateurs), chaînes entre apostrophes ou guillemets sur
+plusieurs lignes — sont recopiés **tels quels** : leurs lignes sont du texte,
+jamais des clés à trier, même si elles contiennent « : ».
 Adapté aux fichiers de config réguliers, pas à du YAML arbitraire.
 
 == Licence
