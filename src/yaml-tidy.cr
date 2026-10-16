@@ -133,19 +133,19 @@ module YamlTidy
   # Genre de scalaire multi-ligne OUVERT par la ligne : `:block` (valeur `|`
   # ou `>`, indicateurs `-`/`+`/chiffre, commentaire possible), `'\''` ou `'"'`
   # (chaîne entre apostrophes/guillemets non refermée sur la ligne) ; nil sinon.
-  def multiline_scalar_kind(stripped : String) : Symbol | Char | Nil
+  def multiline_scalar_kind(stripped : String) : Symbol | Char?
     value = if stripped.starts_with?("- ") && !key_of(stripped[2..])
               stripped[2..]
             elsif i = stripped.index(": ")
               stripped[(i + 2)..]
             else
-              return nil
+              return
             end
     value = value.strip
     return :block if value.matches?(/\A[|>][-+0-9]*\s*(#.*)?\z/)
-    return nil if value.empty?
+    return if value.empty?
     q = value[0]
-    return nil unless q == '\'' || q == '"'
+    return unless q == '\'' || q == '"'
     closes?(value[1..], q) ? nil : q
   end
 

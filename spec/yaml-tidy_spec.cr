@@ -1,30 +1,30 @@
 require "./spec_helper"
 
 SAMPLE = <<-YAML
-# Mis à jour par beryl scan
-# vos clés préservées
-provider: ovh
-ovh:
-  service_name: ns1.eu
-  commercial_name: RISE-1 | Xeon
-vrack:
-  name: pn-1
-  # IP primaire du vRack
-  ip: 192.168.42.31
-  proxy_jump: admin@zsbg.quimeo.net # via bastion
-freebsd:
-  hostname: ben
-  zfs:
-    zroot:
-      raid: 0
-      boot: true
-      disks:
-        - /dev/sda
-        - /dev/sdb
-apply_recipes:
-  - oh-my-zsh: { user: deploy }
-  - clamav
-YAML
+  # Mis à jour par beryl scan
+  # vos clés préservées
+  provider: ovh
+  ovh:
+    service_name: ns1.eu
+    commercial_name: RISE-1 | Xeon
+  vrack:
+    name: pn-1
+    # IP primaire du vRack
+    ip: 192.168.42.31
+    proxy_jump: admin@zsbg.quimeo.net # via bastion
+  freebsd:
+    hostname: ben
+    zfs:
+      zroot:
+        raid: 0
+        boot: true
+        disks:
+          - /dev/sda
+          - /dev/sdb
+  apply_recipes:
+    - oh-my-zsh: { user: deploy }
+    - clamav
+  YAML
 
 describe YamlTidy do
   it "épingle l'en-tête fourni en première ligne (idempotent)" do
