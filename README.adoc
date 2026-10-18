@@ -16,10 +16,16 @@ commentaires portent l'essentiel de l'info.
   ligne du tiret).
 * Commentaires **au-dessus** d'une clé : déplacés AVEC elle au tri.
 * Commentaires **inline** : préservés.
-* **Ordre des éléments** de séquence (listes) : préservé — seules les CLÉS se
-  trient, jamais l'ordre d'une liste (recettes, disques…).
-* Aucune donnée perdue ou altérée (`YAML.parse` du résultat == `YAML.parse` de
-  l'entrée).
+* **Éléments** des séquences en bloc (`- …`) triés alpha aussi : un scalaire
+  par son texte (`- zsh`), un mapping par son `name:` s'il en a un, sinon par
+  sa première clé (`- netif-ipv6: { … }`) ; à égalité, l'ordre d'origine. Le
+  commentaire au-dessus d'un élément le suit ; un commentaire de fin de liste
+  reste à la fin.
+* Séquences **en ligne** (`[a, b]`) : laissées telles quelles — l'ordre y
+  porte souvent un sens (paire `[active, suivante]`).
+* Aucune donnée perdue ou altérée : `YAML.parse` du résultat == `YAML.parse`
+  de l'entrée, à l'ordre des listes en bloc près. C'est VÉRIFIÉ à chaque appel :
+  sinon `YamlTidy::Error`, jamais un fichier altéré.
 * En-tête optionnel épinglé en 1ʳᵉ ligne (idempotent).
 
 == Usage

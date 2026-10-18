@@ -1,5 +1,16 @@
 require "./spec_helper"
 
+# Données YAML à l'ordre des listes près (les éléments sont désormais triés).
+private def unordered(node : YAML::Any) : YAML::Any
+  if h = node.as_h?
+    YAML::Any.new(h.to_a.sort_by(&.[0].to_s).to_h.transform_values { |v| unordered(v) })
+  elsif a = node.as_a?
+    YAML::Any.new(a.map { |v| unordered(v) }.sort_by(&.to_yaml))
+  else
+    node
+  end
+end
+
 SAMPLE = <<-YAML
   # Mis à jour par beryl scan
   # vos clés préservées
@@ -51,10 +62,32 @@ describe YamlTidy do
     res.index("disks:").not_nil!.should be < res.index("raid:").not_nil!
   end
 
-  it "préserve l'ORDRE des séquences (recettes, disques)" do
+  it "trie les ÉLÉMENTS des séquences en bloc (recettes, disques)" do
     res = YamlTidy.tidy(SAMPLE)
-    res.index("oh-my-zsh").not_nil!.should be < res.index("clamav").not_nil!
+    res.index("clamav").not_nil!.should be < res.index("oh-my-zsh").not_nil!
     res.index("/dev/sda").not_nil!.should be < res.index("/dev/sdb").not_nil!
+  end
+
+  it "trie un mapping d'élément par son `name:`, et un mélange scalaires / mappings par clé" do
+    yaml = "apply_recipes:\n  - zfs-scrub\n  - netif-ipv6: { gateway: \"fe80::1\" }\n  - acme\n"
+    YamlTidy.tidy(yaml).should eq("apply_recipes:\n  - acme\n  - netif-ipv6: { gateway: \"fe80::1\" }\n  - zfs-scrub\n")
+  end
+
+  it "garde une séquence écrite au niveau de sa clé sous cette clé (`disks:` puis `- …`)" do
+    yaml = "zroot:\n  raid: 0\n  disks:\n  - /dev/sdb\n  - /dev/sda\n  boot: true\n"
+    res = YamlTidy.tidy(yaml)
+    res.should eq("zroot:\n  boot: true\n  disks:\n  - /dev/sda\n  - /dev/sdb\n  raid: 0\n")
+    unordered(YAML.parse(res)).should eq(unordered(YAML.parse(yaml)))
+  end
+
+  it "laisse les séquences EN LIGNE telles quelles (paire [active, suivante])" do
+    yaml = "ssh_keys:\n  - [zeta.pub, alpha.pub]\n"
+    YamlTidy.tidy(yaml).should eq(yaml)
+  end
+
+  it "déplace le commentaire d'un élément avec lui, et garde le commentaire de fin à la fin" do
+    yaml = "packages:\n  # shell\n  - zsh\n  - curl\n  # fin de liste\n"
+    YamlTidy.tidy(yaml).should eq("packages:\n  - curl\n  # shell\n  - zsh\n  # fin de liste\n")
   end
 
   it "préserve les commentaires au-dessus d'une clé ET inline" do
@@ -64,9 +97,9 @@ describe YamlTidy do
     res.should match(/# IP primaire du vRack\n\s+ip: 192\.168\.42\.31/)
   end
 
-  it "ne PERD ni n'altère AUCUNE donnée (parse YAML identique)" do
+  it "ne PERD ni n'altère AUCUNE donnée (parse YAML identique, à l'ordre des listes près)" do
     res = YamlTidy.tidy(SAMPLE, header: "ben.quimeo.net")
-    YAML.parse(res).should eq(YAML.parse(SAMPLE))
+    unordered(YAML.parse(res)).should eq(unordered(YAML.parse(SAMPLE)))
   end
 
   it "ne DUPLIQUE pas un commentaire situé après un bloc imbriqué" do
@@ -76,13 +109,13 @@ describe YamlTidy do
     res.should match(/# commentaire de vrack\nvrack:/)
   end
 
-  it "trie les clés DANS un item de séquence (dash-map) sans réordonner la liste" do
+  it "trie les clés DANS un item de séquence (dash-map), et les items par `name:`" do
     yaml = "provider: ovh\nusers:\n  - name: deploy\n    groups: [www, wheel]\n  - name: admin\n    groups: [wheel]\n"
     res = YamlTidy.tidy(yaml)
     res.should contain("- groups: [www, wheel]\n    name: deploy")
     res.should contain("- groups: [wheel]\n    name: admin")
-    res.index("deploy").not_nil!.should be < res.index("admin").not_nil!
-    YAML.parse(res).should eq(YAML.parse(yaml))
+    res.index("admin").not_nil!.should be < res.index("deploy").not_nil!
+    unordered(YAML.parse(res)).should eq(unordered(YAML.parse(yaml)))
   end
 
   describe "scalaires multi-lignes (texte recopié tel quel)" do

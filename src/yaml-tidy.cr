@@ -1,10 +1,17 @@
+require "yaml"
+
 # `YamlTidy` range un fichier YAML : trie les clés des mappings par ordre
 # ALPHABÉTIQUE, RÉCURSIVEMENT À TOUS LES NIVEAUX (enfants, petits-enfants…),
 # Y COMPRIS les clés À L'INTÉRIEUR d'un item de séquence qui est un mapping
-# (ex. `users: - name/groups` → `groups` avant `name`). PRÉSERVE :
-#   - les commentaires AU-DESSUS d'une clé (déplacés avec elle au tri) ;
-#   - les commentaires INLINE ;
-#   - l'ORDRE des ÉLÉMENTS de séquence — seules les CLÉS sont triées.
+# (ex. `users: - name/groups` → `groups` avant `name`), ET les ÉLÉMENTS des
+# séquences en bloc (`- …`), par ordre alphabétique de :
+#   - leur texte pour un scalaire (`- zsh`) ;
+#   - leur `name:` pour un mapping qui en a un (`- name: admin`) ;
+#   - sinon leur première clé (`- netif-ipv6: { … }`), puis la ligne entière.
+# Les séquences EN LIGNE (`[a, b]`) restent telles quelles (l'ordre y est
+# souvent un sens : une paire `[active, suivante]`). PRÉSERVE :
+#   - les commentaires AU-DESSUS d'une clé ou d'un élément (déplacés avec lui) ;
+#   - les commentaires INLINE.
 # Optionnellement, épingle une 1ʳᵉ ligne de commentaire (`header`), idempotent.
 #
 # Approche ligne-à-ligne : le `YAML` de la stdlib perd les commentaires, alors
@@ -17,6 +24,12 @@
 #     YamlTidy.tidy(content, header: "monserveur.example") # + `# monserveur.example` en tête
 module YamlTidy
   extend self
+
+  # Levée si le résultat ne porte plus les mêmes données que l'entrée (à l'ordre
+  # des listes en bloc près) : un défaut d'analyse ne doit JAMAIS produire un
+  # fichier altéré — mieux vaut refuser.
+  class Error < Exception
+  end
 
   VERSION = {{
               (read_file("#{__DIR__}/../shard.yml")
@@ -59,9 +72,34 @@ module YamlTidy
     comments = lines[0...body_start].select { |l| l.lstrip.starts_with?('#') }
     nodes, _ = parse(lines, body_start, 0)
     sort!(nodes)
-    String.build do |io|
+    result = String.build do |io|
       emit_header(io, comments, header)
       emit(io, nodes, top: true)
+    end
+    check!(content, result)
+    result
+  end
+
+  # Données identiques à l'ordre des listes près, sinon `Error`. Une entrée
+  # que YAML ne sait pas lire n'est pas vérifiable : rendue telle quelle.
+  private def check!(before : String, after : String) : Nil
+    a = begin
+      YAML.parse(before)
+    rescue YAML::ParseException
+      return
+    end
+    b = YAML.parse(after) rescue raise Error.new("résultat illisible en YAML")
+    raise Error.new("le rangement changerait les données") unless unordered(a) == unordered(b)
+  end
+
+  # Données à l'ordre près : clés de mapping et éléments de liste triés.
+  private def unordered(node : YAML::Any) : YAML::Any
+    if h = node.as_h?
+      YAML::Any.new(h.to_a.sort_by(&.[0].to_s).to_h.transform_values { |v| unordered(v) })
+    elsif arr = node.as_a?
+      YAML::Any.new(arr.map { |v| unordered(v) }.sort_by(&.to_yaml))
+    else
+      node
     end
   end
 
@@ -256,6 +294,11 @@ module YamlTidy
         idx += 1
         if (nxt = next_indent(lines, idx)) && nxt > indent
           node.children, idx = parse(lines, idx, nxt)
+        elsif nxt == indent && node.key && stripped.rstrip.ends_with?(':') && dash_line_next?(lines, idx)
+          # Séquence AU MÊME niveau que sa clé (`disks:` puis `- /dev/sda`, YAML
+          # valide) : ses éléments sont les ENFANTS de la clé, pas des voisins.
+          run, idx = dash_run(lines, idx, indent)
+          node.children, _ = parse(run, 0, indent)
         end
       end
       comments.clear
@@ -265,15 +308,72 @@ module YamlTidy
     {nodes, idx}
   end
 
-  # Tri récursif. Niveau de SÉQUENCE → ordre des éléments PRÉSERVÉ, mais on
-  # descend trier DANS chaque élément (dash-map). Niveau de MAPPING → trié
-  # par clé, puis récursion.
+  # La prochaine ligne de contenu (hors vides et commentaires) est-elle un `- …` ?
+  private def dash_line_next?(lines : Array(String), idx : Int32) : Bool
+    while idx < lines.size
+      s = lines[idx].strip
+      return s.starts_with?("- ") || s == "-" unless s.empty? || s.starts_with?('#')
+      idx += 1
+    end
+    false
+  end
+
+  # Lignes d'une séquence écrite au niveau `indent` de sa clé : ses `- …`, leurs
+  # lignes plus indentées, et les vides/commentaires qui précèdent un `- …`.
+  # S'arrête à la 1ʳᵉ ligne de contenu de niveau `indent` qui n'est pas un `- `.
+  private def dash_run(lines : Array(String), idx : Int32, indent : Int32) : Tuple(Array(String), Int32)
+    run = [] of String
+    while idx < lines.size
+      line = lines[idx]
+      s = line.strip
+      if s.empty? || s.starts_with?('#')
+        break unless dash_line_next?(lines, idx)
+      elsif indent_of(line) == indent && !s.starts_with?("- ")
+        break
+      elsif indent_of(line) < indent
+        break
+      end
+      run << line
+      idx += 1
+    end
+    {run, idx}
+  end
+
+  # Tri récursif. Niveau de SÉQUENCE → éléments triés (`element_key`, ordre
+  # d'origine à égalité), après avoir trié DANS chaque élément (dash-map) ;
+  # les commentaires de fin restent à la fin. Niveau de MAPPING → trié par
+  # clé, puis récursion.
   private def sort!(nodes : Array(Node)) : Nil
     if nodes.any?(&.seq_element?)
       nodes.each { |n| sort!(n.children) }
+      elements, tail = nodes.partition(&.seq_element?)
+      sorted = elements.each_with_index.to_a.sort_by! { |(n, i)| {element_key(n), i} }.map(&.first)
+      nodes.replace(sorted + tail)
       return
     end
     nodes.sort_by! { |n| n.line.nil? ? "￿￿" : (n.key || "￿") }
     nodes.each { |n| sort!(n.children) }
+  end
+
+  # Clé de tri d'un élément de séquence : texte d'un scalaire (`- zsh` → `zsh`),
+  # `name:` d'un mapping qui en a un, sinon sa première clé puis sa ligne.
+  private def element_key(node : Node) : Tuple(String, String)
+    if node.dash_indent
+      entries = node.children.select(&.line)
+      if named = entries.find { |e| e.key == "name" }
+        return {scalar_text(named.line.not_nil!.lstrip[5..]), ""}
+      end
+      first = entries.min_by? { |e| e.key || "" }
+      return {first.try(&.key) || "", first.try(&.line).try(&.strip) || ""}
+    end
+    text = (node.line || "").lstrip
+    text = text[2..] if text.starts_with?("- ")
+    {scalar_text(text), ""}
+  end
+
+  # Scalaire sans guillemets ni espaces autour (`"zsh"` → `zsh`).
+  private def scalar_text(text : String) : String
+    t = text.strip
+    t.size >= 2 && (t[0] == '"' || t[0] == '\'') && t[-1] == t[0] ? t[1...-1] : t
   end
 end
