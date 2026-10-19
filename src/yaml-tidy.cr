@@ -162,8 +162,15 @@ module YamlTidy
     line.size - line.lstrip.size
   end
 
-  # Clé d'une ligne `key: …` (pour le tri). nil si pas une clé de mapping.
+  # Clé d'une ligne `key: …` (pour le tri), SANS ses guillemets : `"netif-ipv6":`
+  # se trie comme `netif-ipv6:`, et un `:` entre guillemets (`- "a: b"`) n'en
+  # fait pas une clé. nil si pas une clé de mapping.
   private def key_of(stripped : String) : String?
+    if (q = stripped[0]?) && (q == '"' || q == '\'')
+      close = stripped.index(q, 1)
+      return unless close && stripped[(close + 1)..].lstrip.starts_with?(':')
+      return stripped[1...close]
+    end
     i = stripped.index(':')
     i ? stripped[0...i].strip : nil
   end

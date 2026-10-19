@@ -80,6 +80,17 @@ describe YamlTidy do
     unordered(YAML.parse(res)).should eq(unordered(YAML.parse(yaml)))
   end
 
+  it "trie une clé entre guillemets comme sans guillemets (mapping et élément de liste)" do
+    YamlTidy.tidy(%(zeta: 1\n"beta": 2\nalpha: 3\n)).should eq(%(alpha: 3\n\n"beta": 2\n\nzeta: 1\n))
+    yaml = %(apply_recipes:\n  - partiduo-store\n  - "netif-ipv6": { gateway: "fe80::1" }\n  - acme\n)
+    YamlTidy.tidy(yaml).should eq(%(apply_recipes:\n  - acme\n  - "netif-ipv6": { gateway: "fe80::1" }\n  - partiduo-store\n))
+  end
+
+  it "ne prend pas un « : » entre guillemets pour une clé (élément scalaire)" do
+    yaml = %(notes:\n  - "z: dernier"\n  - "a: premier"\n)
+    YamlTidy.tidy(yaml).should eq(%(notes:\n  - "a: premier"\n  - "z: dernier"\n))
+  end
+
   it "laisse les séquences EN LIGNE telles quelles (paire [active, suivante])" do
     yaml = "ssh_keys:\n  - [zeta.pub, alpha.pub]\n"
     YamlTidy.tidy(yaml).should eq(yaml)
